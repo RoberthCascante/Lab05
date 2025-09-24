@@ -1,241 +1,207 @@
-// Librería UNA-LIB con mejor manejo de URLs problemáticas
-function validateMessage(jsonMsg) {
-    try {
-        const msgObj = JSON.parse(jsonMsg);
-        
-        msgObj.nombre = sanitizeInput(msgObj.nombre || "Anónimo");
-        msgObj.mensaje = processMessage(msgObj.mensaje || "");
-        msgObj.color = validateColor(msgObj.color || "#000000");
-        
-        return JSON.stringify(msgObj);
-    } catch (error) {
-        console.error('Error validating message:', error);
-        return JSON.stringify({
-            nombre: "Sistema",
-            mensaje: "Mensaje inválido",
-            color: "#FF0000"
+﻿const unalib = require('../libs/unalib');
+
+describe('UNA-LIB Validacion de Mensajes', () => {
+    
+    describe('Prevencion de XSS', () => {
+        test('Debe bloquear script basico', () => {
+            const maliciousInput = JSON.stringify({
+                nombre: "Hacker",
+                mensaje: "<script>alert('XSS')</script>",
+                color: "#FF0000"
+            });
+            
+            const result = JSON.parse(unalib.validateMessage(maliciousInput));
+            expect(result.mensaje).not.toContain('<script>');
+            expect(result.mensaje).not.toContain('alert');
         });
-    }
-}
+        
+        test('Debe bloquear JavaScript en URLs', () => {
+            const maliciousInput = JSON.stringify({
+                nombre: "Hacker",
+                mensaje: "javascript:alert('XSS')",
+                color: "#FF0000"
+            });
+            
+            const result = JSON.parse(unalib.validateMessage(maliciousInput));
+            expect(result.mensaje).not.toContain('javascript:');
+        });
+        
+        test('Debe bloquear event handlers', () => {
+            const maliciousInput = JSON.stringify({
+                nombre: "Hacker",
+                mensaje: "<img src='x' onerror='alert(1)'>",
+                color: "#FF0000"
+            });
+            
+            const result = JSON.parse(unalib.validateMessage(maliciousInput));
+            expect(result.mensaje).not.toContain('onerror=');
+            expect(result.mensaje).not.toContain('alert(1)');
+        });
+        
+        test('Debe detectar intentos de inyeccion', () => {
+            expect(unalib.isScriptInjection('<script>alert("test")</script>')).toBe(true);
+            expect(unalib.isScriptInjection('javascript:void(0)')).toBe(true);
+            expect(unalib.isScriptInjection('<img onerror="alert(1)">')).toBe(true);
+            expect(unalib.isScriptInjection('Mensaje normal')).toBe(false);
+        });
+    });
 
-function sanitizeInput(input) {
-    if (typeof input !== 'string') return "Anónimo";
+    describe('Validacion de URLs de Imagenes', () => {
+        test('Debe validar URLs de imagenes con extension JPG', () => {
+            const imageUrl = 'https://example.com/imagen.jpg';
+            expect(unalib.isValidMediaURL(imageUrl)).toBe(true);
+        });
+        
+        test('Debe validar URLs de imagenes con extension PNG', () => {
+            const imageUrl = 'https://example.com/foto.png';
+            expect(unalib.isValidMediaURL(imageUrl)).toBe(true);
+        });
+        
+        test('Debe validar URLs de imagenes con extension GIF', () => {
+            const imageUrl = 'https://i.imgur.com/animacion.gif';
+            expect(unalib.isValidMediaURL(imageUrl)).toBe(true);
+        });
+        
+        test('Debe crear HTML para imagen valida', () => {
+            const imageUrl = 'https://example.com/test.jpg';
+            const html = unalib.createMediaHTML(imageUrl);
+            
+            expect(html).toContain('<img');
+            expect(html).toContain(imageUrl);
+            expect(html).toContain('max-width: 300px');
+        });
+        
+        test('Debe manejar URLs de Imgur', () => {
+            const imgurUrl = 'https://i.imgur.com/test123.jpg';
+            expect(unalib.isValidMediaURL(imgurUrl)).toBe(true);
+            
+            const html = unalib.createMediaHTML(imgurUrl);
+            expect(html).toContain('<img');
+        });
+    });
     
-    return input
-        .replace(/<script[^>]*>.*?<\/script>/gi, '')
-        .replace(/<[^>]*>/g, '')
-        .replace(/javascript:/gi, '')
-        .replace(/on\w+=/gi, '')
-        .trim()
-        .substring(0, 50) || "Anónimo";
-}
-
-function processMessage(message) {
-    if (typeof message !== 'string') return "";
+    describe('Validacion de URLs de Videos', () => {
+        test('Debe validar URLs de videos MP4', () => {
+            const videoUrl = 'https://example.com/video.mp4';
+            expect(unalib.isValidMediaURL(videoUrl)).toBe(true);
+        });
+        
+        test('Debe validar URLs de videos WebM', () => {
+            const videoUrl = 'https://example.com/video.webm';
+            expect(unalib.isValidMediaURL(videoUrl)).toBe(true);
+        });
+        
+        test('Debe crear HTML para video valido', () => {
+            const videoUrl = 'https://example.com/test.mp4';
+            const html = unalib.createMediaHTML(videoUrl);
+            
+            expect(html).toContain('<video');
+            expect(html).toContain('controls');
+            expect(html).toContain(videoUrl);
+        });
+        
+        test('Debe manejar URLs de YouTube', () => {
+            const youtubeUrls = [
+                'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+                'https://youtu.be/dQw4w9WgXcQ'
+            ];
+            
+            youtubeUrls.forEach(url => {
+                expect(unalib.isValidMediaURL(url)).toBe(true);
+                const html = unalib.createMediaHTML(url);
+                expect(html).toContain('<iframe');
+                expect(html).toContain('youtube.com/embed');
+            });
+        });
+        
+        test('Debe rechazar URLs de video invalidas', () => {
+            const invalidUrls = [
+                'not-a-url',
+                'ftp://example.com/video.mp4',
+                'https://example.com/file.txt'
+            ];
+            
+            invalidUrls.forEach(url => {
+                expect(unalib.isValidMediaURL(url)).toBe(false);
+            });
+        });
+    });
     
-    let sanitized = sanitizeInput(message);
+    describe('Sanitizacion de Entrada', () => {
+        test('Debe sanitizar nombres con HTML', () => {
+            const dirtyName = '<b>Usuario</b><script>alert(1)</script>';
+            const clean = unalib.sanitizeInput(dirtyName);
+            
+            expect(clean).toBe('Usuario');
+            expect(clean).not.toContain('<script>');
+            expect(clean).not.toContain('<b>');
+        });
+        
+        test('Debe limitar longitud de nombres', () => {
+            const longName = 'A'.repeat(100);
+            const clean = unalib.sanitizeInput(longName);
+            
+            expect(clean.length).toBeLessThanOrEqual(50);
+        });
+        
+        test('Debe manejar entrada no string', () => {
+            expect(unalib.sanitizeInput(null)).toBe('Anónimo');
+            expect(unalib.sanitizeInput(undefined)).toBe('Anónimo');
+            expect(unalib.sanitizeInput(123)).toBe('Anónimo');
+        });
+    });
     
-    // Verificar si es URL válida de imagen o video
-    if (isValidMediaURL(sanitized)) {
-        return createMediaHTML(sanitized);
-    }
+    describe('Validacion de Colores', () => {
+        test('Debe validar colores hexadecimales validos', () => {
+            expect(unalib.validateColor('#FF0000')).toBe('#FF0000');
+            expect(unalib.validateColor('#00FF00')).toBe('#00FF00');
+            expect(unalib.validateColor('#0000FF')).toBe('#0000FF');
+        });
+        
+        test('Debe rechazar colores invalidos', () => {
+            expect(unalib.validateColor('rojo')).toBe('#000000');
+            expect(unalib.validateColor('#GGG')).toBe('#000000');
+            expect(unalib.validateColor('javascript:alert(1)')).toBe('#000000');
+        });
+    });
     
-    return sanitized;
-}
-
-function isValidMediaURL(url) {
-    // Validar que sea una URL válida
-    const urlRegex = /^https?:\/\/[^\s/$.?#].[^\s]*$/i;
-    if (!urlRegex.test(url)) return false;
-    
-    // Extensiones explícitas
-    const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff|tif)(\?.*)?$/i;
-    const videoExtensions = /\.(mp4|webm|ogg|avi|mov|wmv|flv|mkv|m4v)(\?.*)?$/i;
-    
-    // Si tiene extensión clara, es válida
-    if (imageExtensions.test(url) || videoExtensions.test(url)) {
-        return true;
-    }
-    
-    // Dominios conocidos
-    const knownMediaDomains = [
-        /wikia\.nocookie\.net/i,
-        /wikitide\.net/i,
-        /fandom\.com/i,
-        /wikipedia\.org/i,
-        /preview\.redd\.it/i,
-        /i\.redd\.it/i,
-        /v\.redd\.it/i,
-        /reddit\.com/i,
-        /imgur\.com/i,
-        /i\.imgur\.com/i,
-        /cdn\./i,
-        /static\./i,
-        /images\./i,
-        /photos\./i,
-        /media\./i,
-        /discordapp\.com/i,
-        /discord\.com/i,
-        /githubusercontent\.com/i,
-        /picsum\.photos/i,
-        /unsplash\.com/i,
-        /pexels\.com/i,
-        /pixabay\.com/i,
-        /tenor\.com/i,
-        /giphy\.com/i,
-        /youtube\.com/i,
-        /youtu\.be/i,
-        /vimeo\.com/i,
-        /dailymotion\.com/i,
-        /twitch\.tv/i,
-        /streamable\.com/i
-    ];
-    
-    const isKnownDomain = knownMediaDomains.some(pattern => pattern.test(url));
-    if (isKnownDomain) {
-        return true;
-    }
-    
-    // Patrones en la ruta
-    const pathPatterns = [
-        /\/images?\//i,
-        /\/photos?\//i,
-        /\/media\//i,
-        /\/gallery\//i,
-        /\/uploads?\//i,
-        /\/assets?\//i,
-        /\/attachments?\//i,
-        /\/files?\//i,
-        /\/thumb/i,
-        /\/preview/i
-    ];
-    
-    return pathPatterns.some(pattern => pattern.test(url));
-}
-
-function createMediaHTML(url) {
-    const imageExtensions = /\.(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff|tif)(\?.*)?$/i;
-    const videoExtensions = /\.(mp4|webm|ogg|avi|mov|wmv|flv|mkv|m4v)(\?.*)?$/i;
-    
-    // URLs problemáticas que mejor mostrar como enlaces
-    const problematicDomains = [
-        /preview\.redd\.it/i,
-        /v\.redd\.it/i
-    ];
-    
-    // Si es un dominio problemático, mostrar como enlace directamente
-    if (problematicDomains.some(pattern => pattern.test(url))) {
-        return createLinkPreview(url);
-    }
-    
-    // Dominios confiables para imágenes
-    const reliableImageDomains = [
-        /i\.imgur\.com/i,
-        /imgur\.com/i,
-        /wikia\.nocookie\.net/i,
-        /wikitide\.net/i,
-        /discordapp\.com.*attachments/i,
-        /githubusercontent\.com/i,
-        /picsum\.photos/i,
-        /media\.tenor\.com/i,
-        /i\.redd\.it/i  // Solo i.redd.it, no preview.redd.it
-    ];
-    
-    const reliableVideoDomains = [
-        /streamable\.com/i,
-        /gfycat\.com/i
-    ];
-    
-    // Determinar tipo de contenido
-    const hasImageExtension = imageExtensions.test(url);
-    const hasVideoExtension = videoExtensions.test(url);
-    const isReliableImageDomain = reliableImageDomains.some(pattern => pattern.test(url));
-    const isReliableVideoDomain = reliableVideoDomains.some(pattern => pattern.test(url));
-    
-    // YouTube manejo especial
-    if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        const videoId = extractYouTubeId(url);
-        if (videoId) {
-            return `<iframe width="300" height="200" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allowfullscreen style="border-radius: 5px;"></iframe>`;
-        }
-    }
-    
-    // Crear HTML según el tipo
-    if (hasImageExtension || isReliableImageDomain) {
-        return `<img src="${url}" alt="Imagen compartida" style="max-width: 300px; max-height: 200px; border-radius: 5px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,0.15);" onerror="this.parentNode.innerHTML = '${createLinkPreview(url).replace(/'/g, "&apos;")}';" onclick="window.open('${url}', '_blank')" />`;
-    }
-    
-    if (hasVideoExtension || isReliableVideoDomain) {
-        return `<video controls style="max-width: 300px; max-height: 200px; border-radius: 5px;" onerror="this.parentNode.innerHTML = '${createLinkPreview(url).replace(/'/g, "&apos;")}';" ><source src="${url}" type="video/mp4">Tu navegador no soporta videos.</video>`;
-    }
-    
-    // Fallback: enlace con preview
-    return createLinkPreview(url);
-}
-
-function createLinkPreview(url) {
-    // Detectar tipo de contenido por la URL
-    let icon = "🔗";
-    let description = "Ver contenido";
-    
-    if (url.includes('reddit.com') || url.includes('redd.it')) {
-        icon = "📱";
-        description = "Ver en Reddit";
-    } else if (url.includes('youtube.com') || url.includes('youtu.be')) {
-        icon = "📺";
-        description = "Ver video en YouTube";
-    } else if (url.includes('imgur.com')) {
-        icon = "🖼️";
-        description = "Ver imagen en Imgur";
-    } else if (url.includes('discord')) {
-        icon = "💬";
-        description = "Ver en Discord";
-    }
-    
-    // Acortar URL para mostrar
-    const shortUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
-    
-    return `<div style="border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 5px 0; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); cursor: pointer;" onclick="window.open('${url}', '_blank')">
-        <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 1.2em;">${icon}</span>
-            <div style="flex: 1;">
-                <div style="font-weight: 500; color: #1976d2; margin-bottom: 2px;">${description}</div>
-                <div style="font-size: 0.85em; color: #666; word-break: break-all;">${shortUrl}</div>
-            </div>
-        </div>
-    </div>`;
-}
-
-function extractYouTubeId(url) {
-    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-    const match = url.match(regex);
-    return match ? match[1] : null;
-}
-
-function validateColor(color) {
-    const colorRegex = /^#[0-9A-F]{6}$/i;
-    return colorRegex.test(color) ? color : "#000000";
-}
-
-function isScriptInjection(input) {
-    const scriptPatterns = [
-        /<script[^>]*>/gi,
-        /javascript:/gi,
-        /on\w+=/gi,
-        /<iframe[^>]*>/gi,
-        /<object[^>]*>/gi,
-        /<embed[^>]*>/gi
-    ];
-    
-    return scriptPatterns.some(pattern => pattern.test(input));
-}
-
-module.exports = {
-    validateMessage,
-    sanitizeInput,
-    processMessage,
-    isValidMediaURL,
-    createMediaHTML,
-    validateColor,
-    isScriptInjection
-};
+    describe('Integracion Completa', () => {
+        test('Debe procesar mensaje normal correctamente', () => {
+            const normalInput = JSON.stringify({
+                nombre: "Usuario",
+                mensaje: "Hola, como estan?",
+                color: "#3366CC"
+            });
+            
+            const result = JSON.parse(unalib.validateMessage(normalInput));
+            
+            expect(result.nombre).toBe('Usuario');
+            expect(result.mensaje).toBe('Hola, como estan?');
+            expect(result.color).toBe('#3366CC');
+        });
+        
+        test('Debe procesar imagen y mantener seguridad', () => {
+            const imageInput = JSON.stringify({
+                nombre: "Usuario<script>alert(1)</script>",
+                mensaje: "https://example.com/imagen.jpg",
+                color: "#FF0000"
+            });
+            
+            const result = JSON.parse(unalib.validateMessage(imageInput));
+            
+            expect(result.nombre).toBe('Usuario');
+            expect(result.mensaje).toContain('<img');
+            expect(result.mensaje).toContain('example.com/imagen.jpg');
+            expect(result.mensaje).not.toContain('<script>');
+        });
+        
+        test('Debe manejar JSON malformado', () => {
+            const badInput = 'esto no es JSON valido';
+            const result = JSON.parse(unalib.validateMessage(badInput));
+            
+            expect(result.nombre).toBe('Sistema');
+            expect(result.mensaje).toBe('Mensaje inválido');
+            expect(result.color).toBe('#FF0000');
+        });
+    });
+});
