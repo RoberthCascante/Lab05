@@ -1,0 +1,35 @@
+{
+  "name": "una-chat-lab5",
+  "version": "1.0.0",
+  "description": "Chat seguro para Lab 5 de Seguridad Informática - Universidad Nacional Costa Rica",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "demo": "node demo/xss-test.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "socket.io": "^4.7.2"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "keywords": [
+    "una",
+    "chat", 
+    "socket.io", 
+    "seguridad", 
+    "xss", 
+    "validacion",
+    "lab5"
+  ],
+  "author": "Roberth Cascante- Ingeniería en Sistemas",
+  "license": "MIT",
+  "university": "Universidad Nacional de Costa Rica",
+  "campus": "Sede Regional Chorotega - Campus Nicoya",
+  "course": "Seguridad Informática",
+  "lab": "Lab 5",
+  "professor": "Ing. Alex Villegas Carranza, M.Sc."
+}
