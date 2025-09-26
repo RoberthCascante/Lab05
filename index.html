@@ -130,6 +130,17 @@
         align-items: center;
       }
       
+      .input-container {
+        position: relative;
+        flex: 1;
+        display: flex;
+        align-items: center;
+      }
+      
+      .input-container:hover .upload-btn {
+        opacity: 1;
+      }
+      
       .chat-form input {
         border: 2px solid #e0e0e0;
         padding: 12px 15px;
@@ -151,6 +162,38 @@
       
       #m {
         flex: 1;
+        padding-right: 50px; /* Espacio para el botón de upload */
+      }
+      
+      .upload-btn {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: #667eea;
+        border: none;
+        font-size: 1.1em;
+        cursor: pointer;
+        padding: 6px;
+        border-radius: 50%;
+        color: white;
+        z-index: 15;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.8;
+        transition: opacity 0.2s ease, background-color 0.2s ease;
+      }
+      
+      .upload-btn:hover {
+        background: #5a67d8;
+        opacity: 1;
+      }
+      
+      .upload-btn:active {
+        background: #4c51bf;
       }
       
       .chat-form button {
@@ -235,7 +278,11 @@
       
       <form class="chat-form" action="">
         <input id="nombre" autocomplete="off" placeholder="Tu nombre" maxlength="50"/>
-        <input id="m" autocomplete="off" placeholder="Escribe un mensaje o pega una URL de imagen/video..." maxlength="2000"/>
+        <div class="input-container">
+          <input id="m" autocomplete="off" placeholder="Escribe un mensaje o pega una URL de imagen/video..." maxlength="2000"/>
+          <input type="file" id="fileInput" accept="image/*,video/*" style="display: none;">
+          <button type="button" id="uploadBtn" class="upload-btn">📎</button>
+        </div>
         <button type="submit">Enviar</button>
       </form>
     </div>
@@ -369,6 +416,173 @@
 
         // Auto-focus en el campo de mensaje
         $('#m').focus();
+
+        // Funcionalidad de upload de archivos
+        $('#uploadBtn').click(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            $('#fileInput').click();
+        });
+
+        // Manejar selección de archivo
+        $('#fileInput').change(function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                handleFileUpload(file);
+            }
+        });
+
+        function handleFileUpload(file) {
+            // Validar tipo de archivo
+            const validImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            const validVideoTypes = ['video/mp4', 'video/webm', 'video/ogg'];
+            const allValidTypes = [...validImageTypes, ...validVideoTypes];
+            
+            if (!allValidTypes.includes(file.type)) {
+                showStatus('⚠️ Tipo de archivo no soportado. Usa JPG, PNG, GIF, WebP, MP4, WebM u OGG', 'warning');
+                return;
+            }
+
+            // Validar tamaño (máximo 5MB para imágenes, 10MB para videos)
+            const maxImageSize = 5 * 1024 * 1024; // 5MB
+            const maxVideoSize = 10 * 1024 * 1024; // 10MB
+            const maxSize = validImageTypes.includes(file.type) ? maxImageSize : maxVideoSize;
+            
+            if (file.size > maxSize) {
+                const maxSizeMB = validImageTypes.includes(file.type) ? '5MB' : '10MB';
+                showStatus(`⚠️ El archivo es demasiado grande. Máximo ${maxSizeMB}`, 'warning');
+                return;
+            }
+
+            // Mostrar progreso
+            showStatus('📤 Subiendo archivo...', 'warning');
+
+            // Crear URL temporal para el archivo
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const dataUrl = e.target.result;
+                    sendFileAsMessage(file.name, dataUrl, file.type);
+                } catch (error) {
+                    showStatus('❌ Error al procesar archivo', 'error');
+                    console.error('Error:', error);
+                }
+            };
+            reader.onerror = function() {
+                showStatus('❌ Error al leer archivo', 'error');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function sendFileAsMessage(fileName, dataUrl, fileType) {
+            const nombreTxt = $('#nombre').val().trim() || "Anónimo";
+            
+            if (colorHexTxt === "") {
+                colorHexTxt = getRandomColor();
+            }
+
+            // En lugar de enviar el data URL completo, enviar solo el nombre
+            // y crear el HTML en el cliente
+            let mensaje;
+            if (fileType.startsWith('image/')) {
+                mensaje = `[ARCHIVO_IMAGEN:${fileName}]`;
+            } else if (fileType.startsWith('video/')) {
+                mensaje = `[ARCHIVO_VIDEO:${fileName}]`;
+            }
+
+            const jsonMsg = { 
+                nombre: nombreTxt, 
+                mensaje: mensaje, 
+                color: colorHexTxt,
+                fileData: dataUrl, // Incluir data URL
+                fileName: fileName,
+                fileType: fileType
+            };
+
+            try {
+                // Para archivos, mostrar directamente en el chat local
+                displayFileMessage(jsonMsg);
+                showStatus('✅ Archivo mostrado', 'success');
+                $('#fileInput').val(''); // Limpiar input
+            } catch (error) {
+                showStatus('❌ Error al mostrar archivo', 'error');
+                console.error('Error:', error);
+            }
+        }
+
+        function displayFileMessage(msgData) {
+            let contenidoArchivo;
+            
+            if (msgData.fileType.startsWith('image/')) {
+                contenidoArchivo = `<div style="margin: 8px 0;">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
+                        <span>📷</span>
+                        <span>${msgData.fileName}</span>
+                        <span style="color: #999; font-size: 0.8em;">(${(msgData.fileData.length / 1024).toFixed(1)}KB)</span>
+                    </div>
+                    <img src="${msgData.fileData}" alt="${msgData.fileName}" 
+                         style="max-width: 300px; max-height: 300px; border-radius: 8px; cursor: pointer; 
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: transform 0.2s;" 
+                         onclick="this.style.transform = this.style.transform ? '' : 'scale(1.5)'; this.style.zIndex = this.style.zIndex ? '' : '1000'; this.style.position = this.style.position ? '' : 'relative';" />
+                </div>`;
+            } else if (msgData.fileType.startsWith('video/')) {
+                contenidoArchivo = `<div style="margin: 8px 0;">
+                    <div style="font-size: 0.85em; color: #666; margin-bottom: 5px; display: flex; align-items: center; gap: 5px;">
+                        <span>🎥</span>
+                        <span>${msgData.fileName}</span>
+                        <span style="color: #999; font-size: 0.8em;">(${(msgData.fileData.length / 1024).toFixed(1)}KB)</span>
+                    </div>
+                    <video controls style="max-width: 300px; max-height: 300px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15);">
+                        <source src="${msgData.fileData}" type="${msgData.fileType}">
+                        Tu navegador no soporta este formato de video.
+                    </video>
+                </div>`;
+            }
+
+            // Crear el HTML del mensaje completo
+            const mensajeDisplay = "<b style='color:"+ msgData.color +"'>" + 
+                                 htmlEscape(msgData.nombre) + "</b>: " + contenidoArchivo;
+            
+            // Agregar mensaje al chat
+            const newMessage = $('<li>').html(mensajeDisplay);
+            $('#messages').append(newMessage);
+            
+            // Scroll automático al último mensaje
+            const messagesContainer = $('#messages');
+            messagesContainer.scrollTop(messagesContainer[0].scrollHeight);
+        }
+
+        // Drag and drop functionality (simplificado)
+        let dragCounter = 0;
+        
+        $(document).on('dragenter', function(e) {
+            e.preventDefault();
+            dragCounter++;
+            $('.chat-container').addClass('drag-over');
+        });
+
+        $(document).on('dragleave', function(e) {
+            e.preventDefault();
+            dragCounter--;
+            if (dragCounter === 0) {
+                $('.chat-container').removeClass('drag-over');
+            }
+        });
+
+        $(document).on('dragover', function(e) {
+            e.preventDefault();
+        });
+
+        $(document).on('drop', function(e) {
+            e.preventDefault();
+            dragCounter = 0;
+            $('.chat-container').removeClass('drag-over');
+            
+            const files = e.originalEvent.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileUpload(files[0]);
+            }
+        });
 
         // Contador de caracteres para el mensaje
         $('#m').on('input', function() {
